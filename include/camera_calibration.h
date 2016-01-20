@@ -3,6 +3,8 @@
 
 #include <lms/module.h>
 
+#include <opencv2/core/core.hpp>
+
 /**
  * @brief LMS module camera_calibration
  **/
