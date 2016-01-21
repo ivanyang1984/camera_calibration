@@ -22,13 +22,23 @@ protected:
     Pattern pattern;
     cv::Size patternSize;
     std::vector<cv::Point3f> patternPoints;
-
     std::vector< std::vector<cv::Point2f> > detectedPoints;
+
+    lms::Time lastCapture;
+
+    // Calibration
+    bool hasValidCalibration;
+    cv::Mat intrinsics; //!< Computed intrinsic camera matrix
+    cv::Mat coeff;      //!< Computed distortion model coefficients
 
     bool setPattern();
     void computePatternPoints();
     bool findPoints(const cv::Mat& img, std::vector<cv::Point2f>& points);
+    void detect(cv::Mat& img, cv::Mat& visualization);
     bool calibrate();
+    bool undistort(const cv::Mat& img, cv::Mat& undist);
+
+    bool saveCalibration();
 };
 
 #endif // CAMERA_CALIBRATION_H
