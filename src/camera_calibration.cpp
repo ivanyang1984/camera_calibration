@@ -92,7 +92,7 @@ bool CameraCalibration::setPattern()
         pattern = Pattern::CHESSBOARD;
     } else if (pt == "circles") {
         pattern = Pattern::CIRCLES;
-    } else if (pt == "circles") {
+    } else if (pt == "circles_asymmetric") {
         pattern = Pattern::CIRCLES_ASYMMETRIC;
     } else {
         logger.error("pattern") << "Invalid calibration pattern";
