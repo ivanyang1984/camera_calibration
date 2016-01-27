@@ -64,6 +64,7 @@ void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
         // Enough delay has passed between images to generate a new sample
         detectedPoints.push_back(centers);
         logger.info("detect") << "Found " << detectedPoints.size() << " patterns";
+        lastCapture = lms::Time::now();
     }
 
     if (detectedPoints.size() > config().get<size_t>("min_detections", 10)) {
