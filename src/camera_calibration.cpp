@@ -40,14 +40,13 @@ bool CameraCalibration::cycle()
         cv::Mat tmp;
         undistort(imgColor, tmp);
         imgColor = tmp;
-    }
-    else {
+    } else {
         // Detect pattern
         detect(img, imgColor);
     }
 
     cv::imshow("camera_calibration", imgColor);
-    cv::waitKey(0);
+    cv::waitKey(config().get<int>("wait", 10));
 
     return true;
 }
