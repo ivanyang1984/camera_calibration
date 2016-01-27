@@ -16,6 +16,7 @@ public:
     bool initialize() override;
     bool deinitialize() override;
     bool cycle() override;
+    void configsChanged() override;
 
 protected:
     lms::ReadDataChannel<lms::imaging::Image> image;
@@ -31,6 +32,7 @@ protected:
     cv::Mat intrinsics; //!< Computed intrinsic camera matrix
     cv::Mat coeff;      //!< Computed distortion model coefficients
 
+    bool initPattern();
     bool setPattern();
     void computePatternPoints();
     bool findPoints(const cv::Mat& img, std::vector<cv::Point2f>& points);

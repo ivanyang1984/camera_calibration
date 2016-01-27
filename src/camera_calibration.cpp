@@ -8,13 +8,10 @@ bool CameraCalibration::initialize()
 {
     image = readChannel<lms::imaging::Image>("IMAGE");
 
-    if (!setPattern()) {
+    if(!initPattern()) {
         return false;
     }
 
-    patternSize = cv::Size(config().get<int>("points_per_row"),
-                           config().get<int>("points_per_col"));
-    computePatternPoints();
     cv::namedWindow("camera_calibration");
 
     hasValidCalibration = false;
@@ -51,6 +48,11 @@ bool CameraCalibration::cycle()
     return true;
 }
 
+void CameraCalibration::configsChanged() {
+    logger.info("configs") << "Configs changed, recomputing calibration pattern";
+    initPattern();
+}
+
 void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
 {
     std::vector<cv::Point2f> centers;
@@ -70,6 +72,17 @@ void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
     }
 }
 
+bool CameraCalibration::initPattern() {
+    if (!setPattern()) {
+        return false;
+    }
+
+    patternSize = cv::Size(config().get<int>("points_per_row"),
+                           config().get<int>("points_per_col"));
+    computePatternPoints();
+
+    return true;
+}
 
 bool CameraCalibration::setPattern()
 {
