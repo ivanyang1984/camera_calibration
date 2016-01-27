@@ -222,27 +222,97 @@ bool CameraCalibration::saveCalibration()
         logger.error("intrinsics") << "Invalid intrinsic matrix dimensions: " << intrinsics.rows << " x " << intrinsics.cols;
     }
 
-    std::ofstream output(saveLogDir("camera_calibration") + "calibration.lconf");
+    std::ofstream params_out(saveLogDir("camera_calibration") + "params.lconf");
 
-    output << "model = ";
+    params_out << "model = ";
     if(Model::FISHEYE == model) {
-        output << "fisheye";
+        params_out << "fisheye";
     } else {
-        output << "default";
+        params_out << "default";
     }
-    output << std::endl;
-    
-    output << "col = " << image->width() << std::endl;
-    output << "row = " << image->height() << std::endl;
-    output << "Fx = " << intrinsics.at<double>(0, 0) << std::endl;
-    output << "Fy = " << intrinsics.at<double>(1, 1) << std::endl;
-    output << "Cx = " << intrinsics.at<double>(0, 2) << std::endl;
-    output << "Cy = " << intrinsics.at<double>(1, 2) << std::endl;
+    params_out << std::endl;
+
+    params_out << "col = " << image->width() << std::endl;
+    params_out << "row = " << image->height() << std::endl;
+    params_out << "Fx = " << intrinsics.at<double>(0, 0) << std::endl;
+    params_out << "Fy = " << intrinsics.at<double>(1, 1) << std::endl;
+    params_out << "Cx = " << intrinsics.at<double>(0, 2) << std::endl;
+    params_out << "Cy = " << intrinsics.at<double>(1, 2) << std::endl;
 
     for(int i = 0; i < coeff.cols; i++) {
-        output << "K" + std::to_string(i+1) << " = " << coeff.at<double>(i) << std::endl;
+        params_out << "K" + std::to_string(i + 1) << " = " << coeff.at<double>(i) << std::endl;
     }
 
+    // Compute mapping from undistored pixel coordinates to pixel coordinates in original image (and back)
+    std::ofstream lut_dist_out(saveLogDir("camera_calibration") + "lut_dist.lconf");
+    std::ofstream lut_dist_mat(saveLogDir("camera_calibration") + "lut_dist.m");
+    std::ofstream lut_undist_out(saveLogDir("camera_calibration") + "lut_undist.lconf");
+    std::ofstream lut_undist_mat(saveLogDir("camera_calibration") + "lut_undist.m");
+
+    std::vector<cv::Point2f> points;
+    std::vector<cv::Point2f> pointsDistortedCoordinates;
+    std::vector<cv::Point2f> pointsUndistortedCoordinates;
+    for( int c = 0; c < image->width(); c++ ) {
+        for( int r = 0; r < image->height(); r++ ) {
+            points.emplace_back(r, c);
+        }
+    }
+
+    // Compute undistortion
+    undistort(points, pointsDistortedCoordinates);
+    {
+        std::stringstream x, y, xMat, yMat;
+        auto p = pointsDistortedCoordinates.begin();
+        for(int i = 0; i < image->width()*image->height(); i++) {
+            if(i % image->height() == 0) {
+                x << "\\" << std::endl;
+                y << "\\" << std::endl;
+            }
+            x << p->x;
+            y << p->y;
+            xMat << p->x;
+            yMat << p->y;
+            p++;
+            if( i < image->width()*image->height()-1 ) {
+                x << ",";
+                y << ",";
+                xMat << ",";
+                yMat << ",";
+            }
+        }
+        lut_dist_out << "n2dX = " << x.str() << std::endl;
+        lut_dist_out << "n2dY = " << y.str() << std::endl;
+        lut_dist_mat << "x = [" << xMat.str() << "];" << std::endl;
+        lut_dist_mat << "y = [" << yMat.str() << "];" << std::endl;
+    }
+
+    // Compute distortion
+    distort(points, pointsUndistortedCoordinates);
+    {
+        std::stringstream x, y, xMat, yMat;
+        auto p = pointsUndistortedCoordinates.begin();
+        for(int i = 0; i < image->width()*image->height(); i++) {
+            if(i % image->height() == 0) {
+                x << "\\" << std::endl;
+                y << "\\" << std::endl;
+            }
+            x << p->x;
+            y << p->y;
+            xMat << p->x;
+            yMat << p->y;
+            p++;
+            if( i < image->width()*image->height()-1 ) {
+                x << ",";
+                y << ",";
+                xMat << ",";
+                yMat << ",";
+            }
+        }
+        lut_undist_out << "d2nX = " << x.str() << std::endl;
+        lut_undist_out << "d2nY = " << y.str() << std::endl;
+        lut_undist_mat << "x = [" << xMat.str() << "];" << std::endl;
+        lut_undist_mat << "y = [" << yMat.str() << "];" << std::endl;
+    }
     return true;
 }
 
@@ -255,6 +325,117 @@ bool CameraCalibration::undistort(const cv::Mat& img, cv::Mat& undist)
     }
     return true;
 }
+
+bool CameraCalibration::undistort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& undist)
+{
+    undist.clear();
+
+    cv::Mat mapX, mapY;
+    if (model == Model::FISHEYE)
+    {
+        //cv::fisheye::undistortPoints(points, undist, intrinsics, coeff);
+        return false;
+    }
+    else
+    {
+        initUndistortRectifyMap(intrinsics, coeff, cv::noArray(),
+                                getNewCameraMatrix(),
+                                getSize(), CV_32FC1, mapX, mapY);
+    }
+
+    // Remap points
+    for(const auto& p : points)
+    {
+        undist.emplace_back(mapX.at<float>(p.x, p.y), mapY.at<float>(p.x, p.y));
+    }
+
+    return true;
+}
+
+bool CameraCalibration::distort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& dist)
+{
+    dist.clear();
+
+    cv::Mat mapX, mapY;
+    if (model == Model::FISHEYE)
+    {
+        //cv::fisheye::undistortPoints(points, undist, intrinsics, coeff);
+        return false;
+    }
+    else
+    {
+        initUndistortRectifyMap(intrinsics, coeff, cv::noArray(),
+                                getNewCameraMatrix(),
+                                getSize(), CV_32FC1, mapX, mapY);
+    }
+
+    // Compute reverse mapping using interpolation
+    cv::Mat revX(mapX.rows, mapX.cols, CV_32FC1, std::numeric_limits<float>::quiet_NaN());
+    cv::Mat revY(mapX.rows, mapX.cols, CV_32FC1, std::numeric_limits<float>::quiet_NaN());
+
+    // "Project" original mapping
+    for( int c = 0; c < mapX.cols; c++ ) {
+        for( int r = 0; r < mapX.rows; r++ ) {
+            auto x = mapX.at<float>(r, c);
+            auto y = mapY.at<float>(r, c);
+            revX.at<float>(y, x) = static_cast<float>(c);
+            revY.at<float>(y, x) = static_cast<float>(r);
+        }
+    }
+
+    // Interpolate missing projections
+    interpolate(revX, 10);
+    interpolate(revY, 10);
+
+    // Remap points
+    for(const auto& p : points)
+    {
+        auto x = revX.at<float>(p.x, p.y);
+        if(std::isnan(x)) {
+            x = -1;
+        }
+        auto y = revY.at<float>(p.x, p.y);
+        if(std::isnan(x)) {
+            y = -1;
+        }
+        dist.emplace_back(x, y);
+    }
+
+    return true;
+}
+
+void CameraCalibration::interpolate(cv::Mat& mat, size_t iterations)
+{
+    for(size_t i = 0; i < iterations; i++) {
+        for( int c = 1; c < mat.cols-1; c++ ) {
+            for( int r = 0; r < mat.rows; r++ ) {
+                // Interpolate horizontally
+                if(std::isnan(mat.at<float>(r, c))) {
+                    // needs interpolation
+                    auto left = mat.at<float>(r, c-1);
+                    auto right = mat.at<float>(r, c+1);
+                    if(!std::isnan(left) && !std::isnan(right)) {
+                        mat.at<float>(r, c) = (left+right)/2;
+                    }
+                }
+            }
+        }
+        for( int c = 0; c < mat.cols; c++ ) {
+            for( int r = 1; r < mat.rows-1; r++ ) {
+                // Interpolate horizontally
+                if(std::isnan(mat.at<float>(r, c))) {
+                    // needs interpolation
+                    auto top = mat.at<float>(r-1, c);
+                    auto bottom = mat.at<float>(r+1, c);
+                    if(!std::isnan(top) && !std::isnan(bottom)) {
+                        mat.at<float>(r, c) = (top+bottom)/2;
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 cv::Size CameraCalibration::getSize()
 {

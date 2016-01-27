@@ -47,6 +47,10 @@ protected:
     void detect(cv::Mat& img, cv::Mat& visualization);
     bool calibrate();
     bool undistort(const cv::Mat& img, cv::Mat& undist);
+    bool undistort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& undist);
+    bool distort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& dist);
+
+    void interpolate(cv::Mat& mat, size_t iterations);
 
     bool saveCalibration();
 };
