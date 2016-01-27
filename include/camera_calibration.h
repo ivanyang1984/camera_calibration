@@ -20,6 +20,8 @@ public:
 
 protected:
     lms::ReadDataChannel<lms::imaging::Image> image;
+
+    Model model;
     Pattern pattern;
     cv::Size patternSize;
     std::vector<cv::Point3f> patternPoints;
@@ -29,12 +31,18 @@ protected:
 
     // Calibration
     bool hasValidCalibration;
+    double reprojectionError;
     cv::Mat intrinsics; //!< Computed intrinsic camera matrix
     cv::Mat coeff;      //!< Computed distortion model coefficients
 
-    bool initPattern();
+    bool initParameters();
+    bool setModel();
     bool setPattern();
     void computePatternPoints();
+
+    cv::Size getSize();
+    cv::Mat getNewCameraMatrix();
+
     bool findPoints(const cv::Mat& img, std::vector<cv::Point2f>& points);
     void detect(cv::Mat& img, cv::Mat& visualization);
     bool calibrate();

@@ -7,4 +7,9 @@ enum class Pattern {
     CIRCLES_ASYMMETRIC
 };
 
+enum class Model {
+    DEFAULT,
+    FISHEYE
+};
+
 #endif // CAMERA_CALIBRATION_CALIBRATION_H

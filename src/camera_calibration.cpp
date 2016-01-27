@@ -8,7 +8,7 @@ bool CameraCalibration::initialize()
 {
     image = readChannel<lms::imaging::Image>("IMAGE");
 
-    if(!initPattern()) {
+    if(!initParameters()) {
         return false;
     }
 
@@ -50,7 +50,7 @@ bool CameraCalibration::cycle()
 
 void CameraCalibration::configsChanged() {
     logger.info("configs") << "Configs changed, recomputing calibration pattern";
-    initPattern();
+    initParameters();
 }
 
 void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
@@ -67,14 +67,19 @@ void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
         lastCapture = lms::Time::now();
     }
 
-    if (detectedPoints.size() > config().get<size_t>("min_detections", 10)) {
+    if (detectedPoints.size() >= config().get<size_t>("min_detections", 50)) {
         logger.info("calibrate") << "Computing camera matrix";
         calibrate();
+        logger.info("calibrate") << "Camera calibration finished with reprojection error " << reprojectionError;
     }
 }
 
-bool CameraCalibration::initPattern() {
+bool CameraCalibration::initParameters() {
     if (!setPattern()) {
+        return false;
+    }
+
+    if(!setModel()) {
         return false;
     }
 
@@ -96,11 +101,26 @@ bool CameraCalibration::setPattern()
     } else if (pt == "circles_asymmetric") {
         pattern = Pattern::CIRCLES_ASYMMETRIC;
     } else {
-        logger.error("pattern") << "Invalid calibration pattern";
+        logger.error("pattern") << "Invalid calibration pattern '" << pt << "'";
         return false;
     }
     return true;
 }
+
+bool CameraCalibration::setModel()
+{
+    auto md = config().get<std::string>("model", "default");
+    if(md == "default") {
+        model = Model::DEFAULT;
+    } else if(md == "fisheye") {
+        model = Model::FISHEYE;
+    } else {
+        logger.error("model") << "Invalid distortion model '" << md << "'";
+        return false;
+    }
+    return true;
+}
+
 
 void CameraCalibration::computePatternPoints()
 {
@@ -160,15 +180,30 @@ bool CameraCalibration::calibrate()
 
     double calibrationResult = 0.0;
 
-    if (config().get<std::string>("model") == "fisheye") {
+    if (model == Model::FISHEYE) {
         calibrationResult = cv::fisheye::calibrate(worldCoordinates, detectedPoints, imgSize,
                                                    intrinsics, coeff, cv::noArray(), cv::noArray());
     } else {
+        int flags = 0;
+        if(config().get<bool>("fix_principal_point", false)) {
+            flags |= CV_CALIB_FIX_PRINCIPAL_POINT;
+        }
+        if(config().get<bool>("fix_aspect_ratio", false)) {
+            flags |= CV_CALIB_FIX_ASPECT_RATIO;
+        }
+        if(config().get<bool>("zero_tangent_dist", false)) {
+            flags |= CV_CALIB_ZERO_TANGENT_DIST;
+        }
+        if(config().get<bool>("rational_model", false)) {
+            flags |= CV_CALIB_RATIONAL_MODEL;
+        }
+
         calibrationResult = cv::calibrateCamera(worldCoordinates, detectedPoints, imgSize,
-                                                intrinsics, coeff, cv::noArray(), cv::noArray());
+                                                intrinsics, coeff, cv::noArray(), cv::noArray(), flags);
     }
 
     hasValidCalibration = true;
+    reprojectionError = calibrationResult;
 
     saveCalibration();
 
@@ -178,20 +213,25 @@ bool CameraCalibration::calibrate()
 bool CameraCalibration::saveCalibration()
 {
     // Save calibration data
-    if(!isEnableSave())
-    {
+    if(!isEnableSave()) {
         logger.error() << "Command line option --enable-save was not specified";
         return false;
     }
 
-    if(intrinsics.rows != 3 || intrinsics.cols != 3)
-    {
+    if(intrinsics.rows != 3 || intrinsics.cols != 3) {
         logger.error("intrinsics") << "Invalid intrinsic matrix dimensions: " << intrinsics.rows << " x " << intrinsics.cols;
     }
 
     std::ofstream output(saveLogDir("camera_calibration") + "calibration.lconf");
 
-    output << "model = " << config().get<std::string>("model", "default") << std::endl;
+    output << "model = ";
+    if(Model::FISHEYE == model) {
+        output << "fisheye";
+    } else {
+        output << "default";
+    }
+    output << std::endl;
+    
     output << "col = " << image->width() << std::endl;
     output << "row = " << image->height() << std::endl;
     output << "Fx = " << intrinsics.at<double>(0, 0) << std::endl;
@@ -199,8 +239,7 @@ bool CameraCalibration::saveCalibration()
     output << "Cx = " << intrinsics.at<double>(0, 2) << std::endl;
     output << "Cy = " << intrinsics.at<double>(1, 2) << std::endl;
 
-    for(int i = 0; i < coeff.cols; i++)
-    {
+    for(int i = 0; i < coeff.cols; i++) {
         output << "K" + std::to_string(i+1) << " = " << coeff.at<double>(i) << std::endl;
     }
 
@@ -209,11 +248,26 @@ bool CameraCalibration::saveCalibration()
 
 bool CameraCalibration::undistort(const cv::Mat& img, cv::Mat& undist)
 {
-    if (config().get<std::string>("model") == "fisheye") {
+    if (model == Model::FISHEYE) {
         cv::fisheye::undistortImage(img, undist, intrinsics, coeff);
+    } else {
+        cv::undistort(img, undist, intrinsics, coeff, getNewCameraMatrix());
     }
-    else {
-        cv::undistort(img, undist, intrinsics, coeff);
+    return true;
+}
+
+cv::Size CameraCalibration::getSize()
+{
+    return cv::Size(image->width(), image->height());
+}
+
+cv::Mat CameraCalibration::getNewCameraMatrix()
+{
+    if(model == Model::FISHEYE) {
+        cv::Mat newIntrinsics;
+        cv::fisheye::estimateNewCameraMatrixForUndistortRectify(intrinsics, coeff, getSize(), cv::noArray(), newIntrinsics);
+        return newIntrinsics;
+    } else {
+        return cv::getOptimalNewCameraMatrix(intrinsics, coeff, getSize(), config().get<float>("scale_factor", 1));
     }
-    return false;
 }
