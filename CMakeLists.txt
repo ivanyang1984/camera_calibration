@@ -5,6 +5,7 @@ set(SOURCES
 
 set(HEADERS
     "include/camera_calibration.h"
+    "include/calibration.h"
 )
 
 find_package( OpenCV REQUIRED )
