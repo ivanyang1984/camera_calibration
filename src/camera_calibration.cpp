@@ -1,9 +1,10 @@
 #include "camera_calibration.h"
 
+#include <boost/format.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
-
 bool CameraCalibration::initialize()
 {
     image = readChannel<lms::imaging::Image>("IMAGE");
@@ -16,7 +17,9 @@ bool CameraCalibration::initialize()
 
     hasValidCalibration = false;
     lastCapture = lms::Time::ZERO;
+    nframesIntr = config().get<size_t>("min_detections", 10);
 
+	  patternOverlay = cv::Mat::zeros(1,1, 6);
     return true;
 }
 
@@ -28,9 +31,15 @@ bool CameraCalibration::deinitialize()
 
 bool CameraCalibration::cycle()
 {
+  std::string msg;
     cv::Mat img, imgColor;
     cv::equalizeHist(image->convertToOpenCVMat(), img);
     cv::cvtColor(img, imgColor, CV_GRAY2BGR);
+
+  
+    if (patternOverlay.cols == 1) {
+			patternOverlay = cv::Mat::zeros(imgColor.size(), imgColor.type());
+		}
 
     if (hasValidCalibration) {
         // Show undistored image
@@ -40,8 +49,17 @@ bool CameraCalibration::cycle()
     } else {
         // Detect pattern
         detect(img, imgColor);
+        
     }
+    cv::add(imgColor,patternOverlay,imgColor);
+    msg = str(boost::format("%d %d %d %d %d %d/%d")  % topLeft % topMid % topRight %  bottomLeft % bottomMid % bottomRight % nframesIntr);
+ 
+		int b = 0;
+    cv::Size textSize = cv::getTextSize(msg, 1, 2, 1, &b);
+		int x_val = imgColor.cols - 2 * textSize.width - 10;
 
+    cv::Point textOrigin(x_val > 0 ? x_val : 10, imgColor.rows - 2 * b - 10);
+    cv::putText(imgColor, msg, textOrigin, 1, 1, cv::Scalar(0, 0, 255));
     cv::imshow("camera_calibration", imgColor);
     cv::waitKey(config().get<int>("wait", 10));
 
@@ -62,12 +80,18 @@ void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
     if (found &&
         lastCapture.since().toFloat<std::milli>() > config().get<float>("delay", 1)) {
         // Enough delay has passed between images to generate a new sample
+     
+      cv::Mat_<cv::Point> corners = cv::Mat(centers);  
+      if(checkFoundPattern(corners, visualization)){
+       
         detectedPoints.push_back(centers);
-        logger.info("detect") << "Found " << detectedPoints.size() << " patterns";
         lastCapture = lms::Time::now();
+        logger.info("detect") << "Found " << detectedPoints.size() << " patterns";
+      }   
+      
     }
 
-    if (detectedPoints.size() >= config().get<size_t>("min_detections", 50)) {
+    if (detectedPoints.size() >= config().get<size_t>("min_detections", 10) * 6) {
         logger.info("calibrate") << "Computing camera matrix";
         calibrate();
         logger.info("calibrate") << "Camera calibration finished with reprojection error " << reprojectionError;
@@ -452,3 +476,80 @@ cv::Mat CameraCalibration::getNewCameraMatrix()
         return cv::getOptimalNewCameraMatrix(intrinsics, coeff, getSize(), config().get<float>("scale_factor", 1));
     }
 }
+
+
+bool CameraCalibration::handlePatternTop(int midX, int cols) {
+	if (midX < cols * 2 / 5) {
+		if (topLeft < nframesIntr) {
+			topLeft++;
+			return true;
+		}
+	}
+	else if (midX < cols * 3 / 5) {
+		if (topMid < nframesIntr) {
+			topMid++;
+			return true;
+		}
+	}
+	else {
+		if (topRight < nframesIntr) {
+			topRight++;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool CameraCalibration::handlePatternBottom(int midX, int cols) {
+	if (midX < cols * 2 / 5) {
+		if (bottomLeft < nframesIntr) {
+			bottomLeft++;
+			return true;
+		}
+	}
+	else if (midX < cols * 3 / 5) {
+		if (bottomMid < nframesIntr) {
+			bottomMid++;
+			return true;
+		}
+	}
+	else {
+		if (bottomRight < nframesIntr) {
+			bottomRight++;
+			return true;
+		}
+	}
+  return false;
+}
+
+bool CameraCalibration::checkFoundPattern(cv::Mat corners, cv::Mat view) {
+  cv::Point patTop = corners.at<cv::Point>(0, 0);
+  cv::Point patBot = corners.at<cv::Point>(patternSize.height * patternSize.width - 1, 0);
+
+	int midX = (patBot.x + patTop.x) / 2, midY = (patTop.y + patBot.y) / 2;
+	bool validNew = false;
+
+	if (midY < view.rows / 2) {
+		validNew = handlePatternTop(midX, view.cols);
+	}
+	else {
+		validNew = handlePatternBottom(midX, view.cols);
+	}
+
+	if (validNew) {
+    cv::Mat poly = cv::Mat::zeros(patternOverlay.size(), patternOverlay.type());
+
+    cv::Point outline[] = { patTop,
+			corners.at<cv::Point>(patternSize.width - 1, 0),
+			patBot,
+			corners.at<cv::Point>((patternSize.height - 1) * (patternSize.width), 0) };
+    cv::fillConvexPoly(poly, outline, 4, cv::Scalar(0, 255, 0));
+
+    cv::add(patternOverlay, 0.4 * poly, patternOverlay);
+	}
+
+	return validNew;
+}
+
+

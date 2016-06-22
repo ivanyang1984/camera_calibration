@@ -26,7 +26,9 @@ protected:
     cv::Size patternSize;
     std::vector<cv::Point3f> patternPoints;
     std::vector< std::vector<cv::Point2f> > detectedPoints;
-
+    cv::Mat patternOverlay;
+	  int topLeft, topMid, topRight, bottomLeft, bottomMid, bottomRight; // The counters for the found images
+    int nframesIntr; // Frames for each region
     lms::Time lastCapture;
 
     // Calibration
@@ -50,6 +52,9 @@ protected:
     bool undistort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& undist);
     bool distort(const std::vector<cv::Point2f>& points, std::vector<cv::Point2f>& dist);
 
+	  bool checkFoundPattern(cv::Mat corners, cv::Mat view);
+    bool handlePatternBottom(int midX, int cols);
+    bool handlePatternTop(int midX, int cols);
     void interpolate(cv::Mat& mat, size_t iterations);
 
     bool saveCalibration();
