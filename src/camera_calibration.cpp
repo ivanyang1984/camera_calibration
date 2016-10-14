@@ -91,7 +91,7 @@ void CameraCalibration::detect(cv::Mat& img, cv::Mat& visualization)
       
     }
 
-    if (detectedPoints.size() >= config().get<size_t>("min_detections", 10) * 6) {
+    if (detectedPoints.size() >= config().get<size_t>("min_detections", 10) * 6) { //Warum mal 6?
         logger.info("calibrate") << "Computing camera matrix";
         calibrate();
         logger.info("calibrate") << "Camera calibration finished with reprojection error " << reprojectionError;
